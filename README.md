@@ -26,26 +26,208 @@ AzureやOpenAIのRealtimeAPI（4o-realtime-preview）のレイテンシーや安
   - 同等のリアルタイム音声処理機能
   - 比較対象としての性能評価
 
-### 測定項目
-1. **接続レイテンシー**
-   - WebSocket接続確立時間
-   - セッション開始までの時間
-   - 初期化完了までの時間
+## 📡 OpenAI Realtime API 詳細仕様
 
-2. **音声処理レイテンシー**
-   - 音声入力から文字起こしまでの時間
-   - テキスト入力から音声合成までの時間
-   - 1ターン目、2ターン目...の処理時間推移
+### WebSocket接続仕様
+- **エンドポイント**: `wss://api.openai.com/v1/audio/realtime`
+- **認証**: Bearer Token（API Key）
+- **プロトコル**: WebSocket over TLS
+- **接続タイムアウト**: 30秒
+- **メッセージ形式**: JSON
 
-3. **ファンクションコール性能**
-   - ファンクションコール実行時間
-   - 成功率とエラー率
-   - 応答品質の評価
+### クライアント→サーバーイベント（送信）
 
-4. **安定性指標**
-   - 接続断線率
-   - タイムアウト発生率
-   - エラー発生パターン
+#### 1. セッション開始
+```json
+{
+  "type": "session.start",
+  "data": {
+    "model": "gpt-4o-realtime-preview",
+    "voice": "alloy",
+    "input_audio_format": "pcm_s16le",
+    "output_audio_format": "pcm_s16le",
+    "sample_rate": 24000,
+    "chunk_length_s": 0.1
+  }
+}
+```
+
+#### 2. 音声データ送信
+```json
+{
+  "type": "input_audio",
+  "data": {
+    "audio": "base64_encoded_audio_data"
+  }
+}
+```
+
+#### 3. テキスト入力
+```json
+{
+  "type": "input_text",
+  "data": {
+    "text": "Hello, how are you?"
+  }
+}
+```
+
+#### 4. ファンクションコール
+```json
+{
+  "type": "function_call",
+  "data": {
+    "name": "get_weather",
+    "arguments": "{\"location\": \"Tokyo\"}"
+  }
+}
+```
+
+#### 5. セッション終了
+```json
+{
+  "type": "session.end"
+}
+```
+
+### サーバー→クライアントイベント（受信）
+
+#### 1. セッション開始確認
+```json
+{
+  "type": "session.started",
+  "data": {
+    "session_id": "session_123"
+  }
+}
+```
+
+#### 2. 音声認識結果
+```json
+{
+  "type": "speech.started",
+  "data": {
+    "timestamp": 1234567890
+  }
+}
+```
+
+```json
+{
+  "type": "speech.partial",
+  "data": {
+    "text": "Hello, how",
+    "timestamp": 1234567890
+  }
+}
+```
+
+```json
+{
+  "type": "speech.final",
+  "data": {
+    "text": "Hello, how are you?",
+    "timestamp": 1234567890
+  }
+}
+```
+
+#### 3. 音声合成結果
+```json
+{
+  "type": "audio.started",
+  "data": {
+    "timestamp": 1234567890
+  }
+}
+```
+
+```json
+{
+  "type": "audio",
+  "data": {
+    "audio": "base64_encoded_audio_data",
+    "timestamp": 1234567890
+  }
+}
+```
+
+```json
+{
+  "type": "audio.finished",
+  "data": {
+    "timestamp": 1234567890
+  }
+}
+```
+
+#### 4. ファンクションコール結果
+```json
+{
+  "type": "function_result",
+  "data": {
+    "name": "get_weather",
+    "result": "{\"temperature\": 25, \"condition\": \"sunny\"}",
+    "timestamp": 1234567890
+  }
+}
+```
+
+#### 5. エラーイベント
+```json
+{
+  "type": "error",
+  "data": {
+    "error": {
+      "type": "invalid_request",
+      "message": "Invalid audio format"
+    }
+  }
+}
+```
+
+## ⏱️ 詳細測定項目
+
+### 1. 接続・セッション開始レイテンシー
+- **WebSocket接続確立時間**: 接続開始から`onopen`イベントまで
+- **認証処理時間**: 接続確立から認証完了まで
+- **セッション初期化時間**: `session.start`送信から`session.started`受信まで
+- **音声処理準備時間**: セッション開始から最初の音声処理可能状態まで
+
+### 2. 音声認識レイテンシー（Speech-to-Text）
+- **音声入力開始時間**: 最初の音声データ送信から`speech.started`受信まで
+- **部分認識レイテンシー**: 音声データ送信から`speech.partial`受信まで
+- **最終認識レイテンシー**: 音声データ送信から`speech.final`受信まで
+- **認識精度**: 部分認識と最終認識のテキスト一致度
+
+### 3. 音声合成レイテンシー（Text-to-Speech）
+- **テキスト入力時間**: `input_text`送信から`audio.started`受信まで
+- **音声生成時間**: `audio.started`から最初の`audio`チャンク受信まで
+- **音声完了時間**: `audio.started`から`audio.finished`受信まで
+- **音声品質**: 生成された音声の長さと品質評価
+
+### 4. ファンクションコールレイテンシー
+- **ファンクション実行時間**: `function_call`送信から`function_result`受信まで
+- **ファンクション成功率**: 成功したファンクションコールの割合
+- **エラーハンドリング時間**: エラー発生から`error`イベント受信まで
+
+### 5. リアルタイム性能指標
+- **音声チャンク間隔**: 連続する音声データチャンク間の時間間隔
+- **イベント処理時間**: 各イベントの処理にかかる時間
+- **バッファリング状況**: 音声バッファの充填率と遅延状況
+- **接続安定性**: 接続断線・再接続の頻度と時間
+
+### 6. サーバー側イベントタイミング
+- **イベント順序の整合性**: 期待されるイベント順序との一致度
+- **タイムスタンプ精度**: サーバー側タイムスタンプの一貫性
+- **イベント間隔**: 連続するイベント間の時間間隔
+- **同時処理能力**: 複数の音声・テキスト処理の並行性
+
+### 7. エラー・異常検知
+- **接続エラー率**: WebSocket接続失敗の頻度
+- **認証エラー率**: API認証失敗の頻度
+- **処理エラー率**: 音声・テキスト処理エラーの頻度
+- **タイムアウト発生率**: 各処理のタイムアウト発生頻度
 
 ## 📊 監視スケジュール
 
