@@ -1,0 +1,2 @@
+# 4o_realtime_preview_ping_pong
+AzureやOpenAIのRealtimeAP（4o-realtime-preview）のレイテンシーや安定性が時間帯や時期によって安定しないという疑惑をはっきりさせるためのAPI監視サービス
